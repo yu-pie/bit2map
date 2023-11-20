@@ -1,0 +1,342 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+
+copyright = """
+Modification notice:
+
+	This is a modified version of the original script.
+	This modification took place in 2012 and 2020 by the Ma_Sys.ma.
+	For further info send an e-mail to Ma_Sys.ma@web.de.
+
+	Small changelist
+	 * Removed JPG and BMP support
+	 * Changed the programs' structure
+	 * Added TGA support
+	 * Wrote a function to restore original data from images
+	   created by this program.
+	 * Marked "monochrome" option as not implemented because
+	   it did not work on the test system
+	 * 2020: Port to Python 3 new python3-pil libary, add -T option
+
+	bin2bmp.py, modified 0.1.6.4 -- a small program to convert 
+	binary data to bitmaps for graphical analysis
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+Original copyright notice:
+
+	bin2bmp.py 0.1.6.4 Copyright (C) 2009 Bryan Harris
+
+	bin2bmp.py is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	bin2bmp.py is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with bin2bmp.py; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+"""
+
+import PIL
+import PIL.Image as Image, os, sys, array, getopt, struct
+
+class bin2bmp:
+
+	output_file = None
+	input_file = None
+	output_type = "PNG"
+	width = 1200
+	bpp = 24
+	create = True
+	filename = None
+	monochrome = False
+	fchn = 0
+	mean_r = 0
+	mean_g = 0
+	mean_b = 0
+	mean_a = 0
+	std_r = 0
+	std_g = 0
+	std_b = 0
+	std_a = 0
+
+	def parse_norm(self, arg):
+		strs = arg.split()
+		self.fchn = int(strs[0])
+		self.mean_r = float(strs[1])
+		self.mean_g = float(strs[2])
+		self.mean_b = float(strs[3])
+		self.mean_a = float(strs[4])
+		self.std_r = float(strs[5])
+		self.std_g = float(strs[6])
+		self.std_b = float(strs[7])
+		self.std_a = float(strs[8])
+		# print("norm image, channel=" + str(self.fchn))
+		# print("norm image, mean(r,g,b,a)=(" + str(self.mean_r) + "," + str(self.mean_g) 
+		# 	+ "," + str(self.mean_b) + "," + str(self.mean_a) + ")")
+		# print("norm image, std(r,g,b,a)=(" + str(self.std_r) + "," + str(self.std_g) 
+		# 	+ "," + str(self.std_b) + "," + str(self.std_a) + ")")
+
+	def usage(self, filename):
+		print("\nUsage: " + filename + " options followed by values (if required)\n")
+		print(" -i, --input       [file]    Input filename (required)")
+		print(" -w, --width       [pixels]  Width of output image (default is " + str(self.width) + ")")
+		print(" -o, --output      [file]    Output filename (default is input_filename.png)")
+		print(" -d, --depth       [bits]    Set color depth (24 default, 32 also possible)")
+		print(" -v, --version               Display version and license information")
+		print(" -m, --monochrome            Set to one bit per pixel mode (black and white)")
+		print(" -r, --restore               Restore input file a to binary file")
+		print(" -t, --tga                   Write TGA instead of PNG images\n")
+		print(" -T, --tiff                  Write TIFF instead of PNG images\n")
+		print("Example: " + filename + " -i test.bin -o test.tga -t\n")
+		exit(1)
+
+	def parse_args(self, argv):
+		try:
+			(opts, args) = getopt.getopt(argv[1:], "w:ho:i:mvrtTd:f:", 
+				["width=", "help", "output=", "input=", "monochrome", "version", "restore", "tga", "tiff", "depth=", 
+				"fdepth="])
+		except getopt.GetoptError as err:
+			print("Unable to parse arguments: " + str(err))
+			self.usage(argv[0])
+
+		for (o, a) in opts:
+			if o in ("-v", "--version"):
+				print(copyright)
+				exit(0)
+			elif o in ("-w", "--width"):
+				try:
+					self.width = int(a)
+				except:
+					print(a + " is not an integer!")
+					self.usage(argv[0])
+			elif o in ("-h", "--help"): self.usage(argv[0])
+			elif o in ("-o", "--output"): self.output_file = a
+			elif o in ("-i", "--input"): self.input_file = a
+			elif o in ("-t", "--tga"): self.output_type = "TGA"
+			elif o in ("-T", "--tiff"): self.output_type = "TIFF"
+			elif o in ("-m", "--monochrome"): self.monochrome = True # TODO IMPLEMENT
+			elif o in ("-d", "--depth"): self.bpp = int(a)
+			elif o in ("-f", "--fdepth"): self.parse_norm(a)
+			elif o in ("-r", "--restore"): self.create = False
+			else: 
+				print("Invalid arguments given")
+				self.usage(argv[0])
+
+		if self.input_file == None:
+			print("No input filename specified.")
+			self.usage(argv[0])
+
+		self.filename = os.path.split(self.input_file)[1]
+
+	def create_image(self):
+		try:
+			fileobj = open(self.input_file, "rb")
+		except:
+			print("Can't open " + sys.argv[1] + " for some reason.")
+			exit(2)
+		try:
+			#TODO Make this work for bigger files...
+			buf = array.array("B", fileobj.read())
+			buf.reverse()
+		except:
+			print("Could not read file into buffer. File size too big?")
+			exit(2)
+
+		output_ext = self.output_type.lower()
+
+		if self.monochrome == False:
+			if self.bpp == 32 :
+				white = (255, 255, 255, 255)
+			else :
+				white = (255, 255, 255)
+		else:
+			print("Monochrome not implemented yet.")
+			exit(3)
+			#white = 1
+
+		chunks = (len(buf) * 8) // self.bpp
+		if chunks % self.width == 0:
+			height = chunks // self.width
+		else:
+			height = chunks // self.width + 1
+		print("w=" + str(self.width) + ",h=" + str(height))
+		
+		if self.bpp == 32 :
+			img = Image.new("RGB", (self.width, height), white)
+		else :
+			img = Image.new("RGB", (self.width, height), white)
+		for i in range(chunks - 1):
+			x = i % self.width
+			y = i // self.width
+			if self.bpp == 16 :
+				rgb565 = buf.pop()
+				rgb565 += (buf.pop() << 8)
+				r = (rgb565 >> 11) << 3
+				g = ((rgb565 >> 5) & 0x3f) << 2
+				b = (rgb565 & 0x1f) << 3
+				color = (r, g, b)
+			elif self.bpp == 24 :
+				r = buf.pop()
+				g = buf.pop()
+				b = buf.pop()
+				# if i < 10 :
+				# 	print("r,g,b=" + str(r) + "," + str(g) + "," + str(b) + ",")
+				color = (r, g, b)
+			else :
+				r = buf.pop()
+				g = buf.pop()
+				b = buf.pop()
+				a = buf.pop()
+				color = (r, g, b, a)
+
+			#TODO Does not work correctly... ?
+			#if i % 8 == 0:
+			#	color_byte = buf.pop()
+			#	color = 1 - (color_byte >> (7 - i) % 8 & 1)
+
+			img.putpixel((x, y), color)
+
+		if self.output_file == None:
+			self.output_file = self.filename + "." + output_ext
+
+		img.save(self.output_file, self.output_type)
+
+		# img = Image.open(self.output_file)
+		# resized_img = img.resize((640,480), Image.BILINEAR)
+		# self.output_file = self.filename + "-resize." + output_ext
+		# resized_img.save(self.output_file, self.output_type)
+
+	def create_image_from_norm(self):
+		try:
+			fileobj = open(self.input_file, "rb")
+		except:
+			print("Can't open " + sys.argv[1] + " for some reason.")
+			exit(2)
+		try:
+			#TODO Make this work for bigger files...
+			buf = array.array("f", fileobj.read())
+			buf.reverse()
+		except:
+			print("Could not read file into buffer. File size too big?")
+			exit(2)
+
+		output_ext = self.output_type.lower()
+
+		if self.monochrome == False:
+			if self.fchn == 4 :
+				white = (255, 255, 255, 255)
+			else :
+				white = (255, 255, 255)
+		else:
+			print("Monochrome not implemented yet.")
+			exit(3)
+			#white = 1
+
+		chunks = (len(buf)) // self.fchn
+		if chunks % self.width == 0:
+			height = chunks // self.width
+		else:
+			height = chunks // self.width + 1
+
+		print("w=" + str(self.width) + ",h=" + str(height))
+
+		img = Image.new("RGB", (self.width, height), white)
+		for i in range(chunks - 1):
+			x = i % self.width
+			y = i // self.width
+			if self.fchn == 3 :
+				r = buf.pop()
+				g = buf.pop()
+				b = buf.pop()
+				# if i < 10 :
+				# 	print("r,g,b=" + str(r) + "," + str(g) + "," + str(b) + ",")
+				r = int((r * self.std_r + self.mean_r) * 255)
+				g = int((g * self.std_g + self.mean_g) * 255)
+				b = int((b * self.std_b + self.mean_b) * 255)
+				# if i < 10 :
+				# 	print("r,g,b=" + str(r) + "," + str(g) + "," + str(b) + ",")
+				color = (r, g, b)
+			else :
+				r = buf.pop()
+				g = buf.pop()
+				b = buf.pop()
+				a = buf.pop()
+				r = int((r * self.std_r + self.mean_r) * 255)
+				g = int((g * self.std_g + self.mean_g) * 255)
+				b = int((b * self.std_b + self.mean_b) * 255)
+				a = int((a * self.std_a + self.mean_a) * 255)
+				color = (r, g, b, a)
+
+			#TODO Does not work correctly... ?
+			#if i % 8 == 0:
+			#	color_byte = buf.pop()
+			#	color = 1 - (color_byte >> (7 - i) % 8 & 1)
+
+			img.putpixel((x, y), color)
+
+		if self.output_file == None:
+			self.output_file = self.filename + "." + output_ext
+
+		img.save(self.output_file, self.output_type)
+
+	def restore_from_image(self):
+		"""Restore a binary file from an image"""
+
+		if self.output_file == None:
+			self.output_file = self.filename + ".bin"
+
+		img = Image.open(self.input_file)
+		size = img.size
+		w = img.width
+		h = img.height
+		f = img.format
+		print("size: " + str(size) + ", format: " + str(f))
+		if self.bpp == 32 :
+			img = img.convert("RGBA")
+		data = img.getdata()
+		# print(list(data))
+		buf = open(self.output_file, "wb")
+
+		for i in data:
+			r = i[0]
+			g = i[1]
+			b = i[2]
+			if self.bpp == 16 :
+				rgb565 = ((r >> 3) << 11) + ((g >> 2) << 5) + (b >> 3)
+				buf.write(struct.pack("BB", rgb565 & 0xFF, rgb565 >> 8))
+			elif self.bpp == 24 :
+				buf.write(struct.pack("BBB", r, g, b))
+			elif self.bpp == 32 :
+				a = i[3]
+				buf.write(struct.pack("BBBB", r, g, b, a))
+
+		buf.close()
+
+if __name__ == '__main__' :
+	obj = bin2bmp()
+	obj.parse_args(sys.argv)
+	if obj.create == True:
+		if (obj.fchn == 0):
+			obj.create_image()
+		else :
+			obj.create_image_from_norm()
+	else:
+		obj.restore_from_image()
+
